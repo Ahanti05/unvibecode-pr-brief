@@ -7,6 +7,7 @@ Markdown comment for a pull request. Standard library only.
 Usage:
   python pr_brief.py --results <unvibecode-analysis-folder> --changed src/a.py src/b.py
   git diff --name-only origin/main... | python pr_brief.py --results <folder> --changed -
+  python pr_brief.py --results examples/flask-sample.json --changed src/flask/helpers.py   # instant demo
 """
 import argparse, collections, glob, html, json, os, re, sys, zipfile
 
@@ -45,8 +46,26 @@ def load_workflows(results):
     return out
 
 
+def top(counter, n):
+    """Most-linked first; ties broken by file name so output is stable."""
+    return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+
+
+def load_sample(path):
+    """Read the small file-level sample in examples/ (no UnvibeCode run needed)."""
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    chunks = [{"file": f} for f in d["files"]]
+    conns = [{"source_file": s, "target_file": t, "links": n} for s, t, n in d["links"]]
+    return chunks, conns, {k: set(v) for k, v in d["workflows"].items()}
+
+
 def build(results, changed):
-    chunks, conns = load_bundle(results)
+    if results.endswith(".json"):
+        chunks, conns, workflows = load_sample(results)
+    else:
+        chunks, conns = load_bundle(results)
+        workflows = load_workflows(results)
     known = {c["file"] for c in chunks}
     changed = [c for c in dict.fromkeys(changed) if c]
     analysed = [c for c in changed if c in known]
@@ -60,12 +79,11 @@ def build(results, changed):
         if s == t:
             continue
         if t in analysed and s not in analysed:
-            dependents[s] += 1
+            dependents[s] += c.get("links", 1)
         if s in analysed and t not in analysed:
-            dependencies[t] += 1
+            dependencies[t] += c.get("links", 1)
 
     # Which workflows touch these files?
-    workflows = load_workflows(results)
     touched = [w for w, fs in workflows.items() if fs & set(analysed)]
 
     # Simple, explainable risk label (heuristic, not a security verdict).
@@ -92,13 +110,13 @@ def build(results, changed):
     L.append("")
     L.append("**Review these files first** (they depend on the changed code)")
     if dependents:
-        L += [f"- `{f}` ({n} link{'s' if n != 1 else ''})" for f, n in dependents.most_common(8)]
+        L += [f"- `{f}` ({n} link{'s' if n != 1 else ''})" for f, n in top(dependents, 8)]
     else:
         L.append("- No other file depends on the changed code.")
     L.append("")
     L.append("**The changed code relies on**")
     if dependencies:
-        L += [f"- `{f}`" for f, _ in dependencies.most_common(5)]
+        L += [f"- `{f}`" for f, _ in top(dependencies, 5)]
     else:
         L.append("- No mapped dependencies.")
     if skipped:
