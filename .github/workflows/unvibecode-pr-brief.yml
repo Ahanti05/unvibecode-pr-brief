@@ -1,0 +1,22 @@
+name: UnvibeCode PR Brief
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install unvibecode
+      # Prototype: reviews the PR branch. A full version would cache the base-branch result.
+      - run: python -m unvibecode review --repository . --output uvc_out --no-open-browser
+      - run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed.txt
+          python pr_brief.py --results "$(ls -d uvc_out/*/ | head -1)" --changed - < changed.txt > comment.md
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with: { path: comment.md }
